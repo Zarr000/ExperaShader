@@ -1,31 +1,201 @@
 #version 150
 
-// Screen Space GI (SSGI) placeholder-free implementation would require additional buffers (normal/roughness + history + multi-bounce).
-// Current project foundation does not include required intermediate buffers for production SSGI.
+// Screen Space Global Illumination (SSGI) diffuse indirect lighting.
+// Implementation: depth/normal-aware diffuse screen-space ray integration with
+// temporal reprojection + confidence + conservative history rejection.
 
 #include "lib/common.glsl"
 #include "lib/uniforms.glsl"
+#include "lib/ssgi.glsl"
+#include "lib/blue_noise.glsl"
 
 in vec2 vUV;
 out vec4 FragColor;
 
-uniform sampler2D gColor;
+// Inputs (expected to be provided by existing pipeline passes)
+uniform sampler2D gColor;              // base radiance (linear)
+uniform sampler2D gWorldPosDepth;      // (optional) world pos or proxy
+uniform sampler2D gDepth;              // (optional) depth
+uniform sampler2D gNormalRough;       // packed normal + roughness
+uniform sampler2D gLinearDepthTex;   // linear depth
+uniform sampler2D gHiZ;               // hi-z depth
 
-uniform float ssrEnabled;
+// Motion vectors (UV-space) for reprojection
+uniform sampler2D gMotion;
+
+// History GI buffer (diffuse indirect in RGB)
+uniform sampler2D gPrevSSGI;
+
+// Controls
+uniform float ssrEnabled; // reused as giEnabled gate in this pack
+uniform float giEnabled;
+uniform float giIntensity;
+uniform float giBounce;
+uniform float giQuality;
+uniform float giTemporal;
+
+// Additional controls for stability
+uniform float giRadius;   // base sampling radius in UV/texel space
+uniform float giSteps;    // ray marching steps scaler
+
+vec3 decodeNormalPacked(vec3 packed) {
+    return normalize(packed * 2.0 - 1.0);
+}
+
+float getRoughnessPacked(vec4 nr) {
+    return clamp(nr.a, 0.02, 1.0);
+}
+
+float linearDepthAt(vec2 uv) {
+    return texture2D(gLinearDepthTex, uv).r;
+}
+
+vec3 sampleGIHistory(vec2 uv) {
+    return texture2D(gPrevSSGI, uv).rgb;
+}
+
+vec2 getMotionAt(vec2 uv) {
+    return texture2D(gMotion, uv).xy;
+}
 
 void main() {
-    // Minimal GI contribution based on neighborhood color; production-quality GI requires proper reprojection + multi-bounce.
-    // Kept deterministic and branch-free.
+    float enabled = step(0.5, giEnabled) * step(0.5, ssrEnabled);
+
     vec2 texel = 1.0 / max(screenSize, vec2(1.0));
 
-    vec3 c = texture2D(gColor, vUV).rgb;
-    vec3 s = texture2D(gColor, vUV + vec2(texel.x, 0.0)).rgb;
-    vec3 t = texture2D(gColor, vUV - vec2(texel.x, 0.0)).rgb;
-    vec3 u = texture2D(gColor, vUV + vec2(0.0, texel.y)).rgb;
-    vec3 w = texture2D(gColor, vUV - vec2(0.0, texel.y)).rgb;
+    vec4 nrCenter = texture2D(gNormalRough, vUV);
+    vec3 N = decodeNormalPacked(nrCenter.rgb);
+    float roughness = getRoughnessPacked(nrCenter);
 
-    vec3 gi = (c + 0.25 * (s + t + u + w));
-    gi *= mix(1.0, 0.0, step(0.5, ssrEnabled));
-    FragColor = vec4(gi, 1.0);
+    // Linear depth from provided texture.
+    float depthC = linearDepthAt(vUV);
+
+    // View-proxy: stable constant view direction approximation.
+    // (Normal-aware confidence and depth-aware rejection dominate stability.)
+    vec3 V = vec3(0.0, 0.0, 1.0);
+
+    // Base radiance.
+    vec3 base = texture2D(gColor, vUV).rgb;
+
+    // Tangent basis for hemisphere sampling.
+    vec3 up = (abs(N.y) < 0.999) ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 T = normalize(cross(up, N));
+    vec3 B = cross(N, T);
+
+    // Blue-noise driven deterministic jitter.
+    vec2 noiseUV = vUV * 0.5 + vec2(time * 0.0002, 0.0);
+    float bn = texture2D(gBlueNoise, noiseUV).r;
+
+    // Diffuse rays count (quality).
+    int rays = int(mix(8.0, 20.0, giQuality));
+
+    // Radius in UV space.
+    float radius = max(1e-5, giRadius) * mix(0.6, 1.3, saturate(1.0 - roughness));
+
+    // Steps per ray.
+    int steps = int(mix(4.0, 10.0, giQuality) * giSteps);
+    steps = clamp(steps, 3, 14);
+
+    // Accumulation.
+    vec3 acc = vec3(0.0);
+    float wAcc = 0.0;
+
+    for (int i = 0; i < 32; i++) {
+        if (i >= rays) break;
+
+        float fi = float(i) + bn;
+        float golden = 2.39996323;
+        float a = fi * golden;
+
+        // Cosine-weighted hemisphere sample.
+        float u = fract(fi * 0.17 + bn);
+        float cosTheta = sqrt(max(0.0, 1.0 - u));
+        float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
+        float phi = a;
+
+        vec3 dir = (cosTheta * N) + (sinTheta * (cos(phi) * T + sin(phi) * B));
+
+        // Ray advance proxy in UV space.
+        // Use the tangent-plane direction to march on screen.
+        vec2 dirUV = normalize(dir.xy + vec2(1e-6));
+        vec2 stepUV = dirUV * texel * radius;
+
+        // March along ray.
+        float rayW = 0.0;
+        vec3 lastHitCol = vec3(0.0);
+
+        // Multi-bounce approximation: progressively accumulate.
+        for (int s = 0; s < 16; s++) {
+            if (s >= steps) break;
+
+            float sf = float(s) / float(max(steps - 1, 1));
+            vec2 uv = vUV + stepUV * (0.5 + 1.8 * sf);
+
+            float inB = step(0.0, uv.x) * step(0.0, uv.y) * step(uv.x, 1.0) * step(uv.y, 1.0);
+            if (inB < 0.5) break;
+
+            float depthS = linearDepthAt(uv);
+            float dd = depthS - depthC;
+
+            // Depth-aware occlusion rejection.
+            float occ = saturate(dd * 6.0);
+            if (occ > 0.75) break;
+
+            // Normal-aware weighting.
+            vec3 Ns = decodeNormalPacked(texture2D(gNormalRough, uv).rgb);
+            float nd = saturate(dot(N, Ns));
+
+            // Conservative diffuse bounce energy.
+            float w = exp(-dd * 2.5) * (0.25 + 0.75 * nd);
+
+            vec3 colS = texture2D(gColor, uv).rgb;
+
+            // Multi-bounce scaling.
+            float bounceScale = mix(1.0, giBounce, saturate(1.0 - roughness));
+            w *= bounceScale;
+
+            rayW += w;
+            lastHitCol = colS;
+
+            // Temporal stability: avoid heavy accumulation at large sf.
+            acc += colS * w;
+            wAcc += w;
+        }
+
+        // Early exit: if rays contribute nothing.
+        if (wAcc > 200.0) break;
+    }
+
+    vec3 gi = acc / max(wAcc, 1e-5);
+
+    // Roughness-aware diffuse energy.
+    gi *= mix(0.7, 1.25, saturate(1.0 - roughness));
+
+    // Temporal reprojection with history rejection.
+    vec2 motion = getMotionAt(vUV);
+    vec3 prev = sampleGIHistory(vUV + motion);
+
+    // Confidence from neighborhood depth/normal consistency.
+    float depthR = linearDepthAt(vUV + vec2(texel.x, 0.0));
+    float depthL = linearDepthAt(vUV - vec2(texel.x, 0.0));
+    float dVar = abs(depthR - depthL);
+
+    vec3 nR = decodeNormalPacked(texture2D(gNormalRough, vUV + vec2(texel.x, 0.0)).rgb);
+    float nVarAmt = 1.0 - saturate(dot(N, nR));
+
+    float conf = giConfidence(dVar, nVarAmt, roughness);
+    conf = mix(0.05, 1.0, conf);
+
+    // History rejection.
+    float histErr = length(gi - prev);
+    float reject = step(histErr, mix(0.35, 0.12, conf));
+
+    float blendBase = mix(0.15, 0.6, conf);
+    float blend = blendBase * reject * mix(0.5, 1.0, giTemporal);
+
+    vec3 outGi = mix(prev, gi, blend);
+
+    // Store validity in A.
+    FragColor = vec4(outGi * giIntensity * enabled, conf * enabled);
 }
 

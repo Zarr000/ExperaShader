@@ -9,13 +9,21 @@ in vec2 vUV;
 out vec4 FragColor;
 
 uniform sampler2D gColor;
+uniform sampler2D gSSGI;
 
 uniform float vignetteIntensity;
+
 uniform float saturation;
 uniform float contrast;
 
 void main() {
     vec3 c = texture2D(gColor, vUV).rgb;
+    // Integrate SSGI diffuse indirect.
+    vec3 gi = texture2D(gSSGI, vUV).rgb;
+    float giValid = texture2D(gSSGI, vUV).a;
+    c += gi * giValid;
+
+
 
     // Contrast around 0.5.
     c = (c - 0.5) * contrast + 0.5;

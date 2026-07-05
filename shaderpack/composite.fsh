@@ -60,8 +60,15 @@ void main() {
     // Cloud shadows.
     lit *= mix(1.0, cloudShadow, 0.75);
 
+    // Integrate SSGI diffuse indirect if available.
+    // gSSGI is expected to be the denoised/temporal resolved diffuse GI buffer.
+    vec3 ssgi = texture2D(gSSGI, vUV).rgb;
+    float ssgiValid = texture2D(gSSGI, vUV).a;
+    lit += ssgi * ssgiValid;
+
     // Tone map.
     vec3 mapped = acesFilmic(lit * exposure);
+
 
     // Gamma.
     vec3 srgb = linearToSRGB(mapped);
