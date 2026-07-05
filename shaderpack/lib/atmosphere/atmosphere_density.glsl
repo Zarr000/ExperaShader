@@ -81,4 +81,9 @@ vec3 atmosphereCombinedDensity(
     );
 }
 
+// Mie density function for sky integration
+float atmosphereDensityMie(float h, float mieScaleHeight) {
+    return atmosphereDensityHeight(h, mieScaleHeight);
+}
+
 #endif

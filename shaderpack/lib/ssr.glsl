@@ -5,6 +5,10 @@
 #include "common/math.glsl"
 #include "common/uniforms.glsl"
 #include "ssr_depth.glsl"
+#include "renderer/renderer_ssr_optimizer.glsl"
+#include "renderer/renderer_ssr_cache.glsl"
+#include "renderer/renderer_ssr_statistics.glsl"
+#include "renderer/renderer_sampling.glsl"
 
 float saturate01(float x) { return saturate(x); }
 
@@ -61,10 +65,13 @@ vec3 ssrRayMarch(
     float roughness,
     sampler2D depthTex,
     int maxSteps,
-    int refineSteps
+    int refineSteps,
+    SSROptimizationState opt
 ) {
     vec2 uv = gl_FragCoord.xy / max(screenSize, vec2(1.0));
-    float rayLen = mix(0.85, 0.25, saturate(roughness));
+    
+    // Adaptive ray length based on optimization state
+    float rayLen = mix(0.85, 0.25, saturate(roughness)) * opt.adaptiveRayLength;
     float stepScale = roughStepScale(roughness);
     float t = 0.0;
     float hit = 0.0;
@@ -73,7 +80,12 @@ vec3 ssrRayMarch(
     vec2 lastUV = uv;
     float thickness = mix(0.0025, 0.0125, saturate(roughness));
 
+    // Adaptive ray count based on roughness
+    int adaptiveSteps = int(rendererSSRAdaptiveRays(roughness, opt));
+    
     for (int i = 0; i < maxSteps; i++) {
+        if (i >= adaptiveSteps) break;
+        
         float fi = float(i);
         float hier = mix(1.9, 0.6, saturate(fi / float(maxSteps)));
         float dt = (0.25 + fi / float(maxSteps)) * stepScale * hier * rayLen;
@@ -91,7 +103,9 @@ vec3 ssrRayMarch(
         float ndvReject = saturate(abs(dot(normalize(vec3(rd.xy, 0.001)), vec3(0.0, 0.0, 1.0))));
 
         if (diff < -thickness && ndvReject < 0.999) {
-            vec2 refinedUV = refineRayBinarySearch(ro, rd, lastUV, lastDepth, uv2, sceneDepth, depthTex, refineSteps);
+            // Adaptive binary search iterations
+            int adaptiveRefine = int(opt.adaptiveSearchIterations);
+            vec2 refinedUV = refineRayBinarySearch(ro, rd, lastUV, lastDepth, uv2, sceneDepth, depthTex, adaptiveRefine);
             float ef = edgeFade(refinedUV);
             hitUV = refinedUV;
             hit = ef;
@@ -102,10 +116,15 @@ vec3 ssrRayMarch(
         lastDepth = sceneDepth;
         uv = uv2;
 
-        if (roughness > 0.65 && i > maxSteps / 2) break;
+        // Early exit for rough surfaces
+        if (roughness > opt.roughnessThreshold && i > maxSteps / 2) break;
     }
 
     float efOut = edgeFade(hitUV);
+    
+    // Accumulate statistics
+    rendererSSRAccumulateCost(opt, float(adaptiveSteps), t, 0.0);
+    
     return vec3(hitUV, hit * efOut);
 }
 

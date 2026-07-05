@@ -8,6 +8,8 @@
 #include "lib/ssr.glsl"
 #include "lib/material/material_data.glsl"
 #include "lib/material/material_decode.glsl"
+#include "lib/renderer/renderer_ssr_optimizer.glsl"
+#include "lib/renderer/renderer_quality.glsl"
 
 in vec2 vUV;
 out vec4 FragColor;
@@ -35,13 +37,6 @@ void main() {
     vec3 N = material.normal;
     float roughness = material.roughness;
 
-    // Reflection routing:
-    // - For now, we treat all reflective materials uniformly.
-    // - Roughness controls blur/filtering and confidence.
-    // - Water reflections will be improved by wiring material ID in a later SSR pass revision.
-
-
-
     // View vector approximation.
     vec3 worldPos = texture2D(gWorldPosDepth, vUV).xyz;
     vec3 V = normalize(vec3(0.0) - worldPos + cameraPosition);
@@ -50,13 +45,15 @@ void main() {
 
     float enable = step(0.5, ssrEnabled);
 
-    int steps = int(mix(20.0, 64.0, ssrQuality));
-    int refine = 6;
-
-    // Use the SSR marcher in a proxy screen-space UV domain.
-    // ro/rd treated as directional proxies.
-    // SSR ray march (source uses depthTex or Hi-Z depending on hiZEnabled).
-    vec3 march = ssrRayMarch(vec3(0.0), rd, roughness, gDepth, steps, refine);
+    // Initialize SSR optimization state with quality
+    SSROptimizationState ssrOpt = rendererSSROptimizerInit(ssrQuality);
+    
+    // Adaptive steps based on quality and roughness
+    int adaptiveSteps = int(rendererSSRAdaptiveRays(roughness, ssrOpt));
+    int adaptiveRefine = int(ssrOpt.adaptiveSearchIterations);
+    
+    // Use the SSR marcher with optimization state
+    vec3 march = ssrRayMarch(vec3(0.0), rd, roughness, gDepth, adaptiveSteps, adaptiveRefine, ssrOpt);
 
 
     vec2 hitUV = march.xy;

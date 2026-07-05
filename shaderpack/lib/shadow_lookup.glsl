@@ -6,6 +6,7 @@
 #include "common/uniforms.glsl"
 #include "shadow_pcss.glsl"
 #include "csm.glsl"
+#include "renderer/renderer_shadow_optimizer.glsl"
 
 // These samplers/matrices are pipeline-specific; we provide conservative defaults.
 uniform sampler2D gShadowMap0;
@@ -45,7 +46,7 @@ float sampleShadowAll(vec4 shadowCoord, sampler2D smap, float bias, float radius
     return occ;
 }
 
-float computeShadowFactor(vec3 worldPos, vec3 N, float roughness) {
+float computeShadowFactor(vec3 worldPos, vec3 N, float roughness, float quality) {
     float enabled = step(0.5, shadowEnabled);
 
     // View depth approximation along light opposite.
@@ -57,13 +58,20 @@ float computeShadowFactor(vec3 worldPos, vec3 N, float roughness) {
     vec4 sc1 = shadowProj1 * vec4(worldPos, 1.0);
     vec4 sc2 = shadowProj2 * vec4(worldPos, 1.0);
 
+    // Initialize shadow optimizer
+    ShadowOpt shadowOpt = rendererShadowOptInit(quality);
+    
+    // Adaptive PCF kernel size based on quality
+    float adaptivePCF = rendererShadowPCF(quality, shadowOpt);
+    int taps = int(adaptivePCF);
+
     float bias = shadowBiasNormal + shadowBiasSlope * (1.0 - saturate(dot(N, -shadowLightDirection)));
     float radius = shadowSoftness;
 
     float s = 1.0;
-    if (cascade == 0) s = sampleShadowAll(sc0, gShadowMap0, bias, radius, 4);
-    else if (cascade == 1) s = sampleShadowAll(sc1, gShadowMap1, bias, radius, 4);
-    else s = sampleShadowAll(sc2, gShadowMap2, bias, radius, 4);
+    if (cascade == 0) s = sampleShadowAll(sc0, gShadowMap0, bias, radius, taps);
+    else if (cascade == 1) s = sampleShadowAll(sc1, gShadowMap1, bias, radius, taps);
+    else s = sampleShadowAll(sc2, gShadowMap2, bias, radius, taps);
 
     // Shadow confidence weighting: soften edges near N.
     float conf = mix(0.6, 1.0, saturate(dot(N, vec3(0.0, 1.0, 0.0))));

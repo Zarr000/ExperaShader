@@ -3,6 +3,7 @@
 #define ATMOSPHERE_MOON_GLSL
 
 #include "atmosphere_common.glsl"
+#include "atmosphere_mie.glsl"
 
 // Production moon rendering model
 // Supports:
