@@ -2,12 +2,20 @@
 
 // Water GBuffer fragment shader.
 // Outputs deferred PBR buffers for photorealistic water rendering.
+// Integrated with Weather Engine V2.
 
 #include "lib/common.glsl"
 #include "lib/uniforms.glsl"
 #include "lib/water_physics.glsl"
 #include "lib/material/material_data.glsl"
 #include "lib/material/material_encode.glsl"
+#include "lib/weather/weather_util.glsl"
+#include "lib/weather/weather_wind.glsl"
+#include "lib/weather/weather_precipitation.glsl"
+#include "lib/water/water_common.glsl"
+#include "lib/water/water_weather.glsl"
+#include "lib/water/water_waves.glsl"
+#include "lib/water/water_surface.glsl"
 
 in vec3 vWorldPos;
 in vec3 vNormal;
@@ -36,9 +44,6 @@ uniform float waterFoamPower;
 
 uniform float underwaterFogDensity;
 uniform float underwaterFogAmount;
-
-// Rain intensity proxy (0..1). Later tied to weather.
-uniform float rainStrength;
 
 vec3 waterBaseAlbedo() {
     // Use the block texture as color modulation.
@@ -71,9 +76,25 @@ void main() {
 
     float ao = getAO();
 
-    // Roughness driven by wave normal variance: more glancing -> rougher.
+    // Weather Engine integration: compute weather frame
+    WeatherFrame weather = weatherComputeFrame(time, 0.016, vWorldPos);
+    WeatherWind wind = weather.wind;
+    WeatherPrecipitation precip = weather.precipitation;
+
+    // Weather-driven water parameters
+    WaterParameters waterParams = weatherDrivenWater(
+        weather.state, wind, precip, weather.wetness, waterQualityLevel()
+    );
+
+    // Compute wave normal with weather wind
+    vec3 waveDisp, waveNormal;
+    vec2 pos = vWorldPos.xz;
+    waterWaveDisplacement(pos, time, wind, waterQualityLevel(), waveDisp, waveNormal);
+    N = normalize(mix(N, waveNormal, 0.5));
+
+    // Roughness driven by wave normal variance and weather
     float ndv = saturate(dot(N, V));
-    float rough = waterRoughness + (1.0 - ndv) * 0.10;
+    float rough = waterParams.roughness + (1.0 - ndv) * 0.10;
     rough = saturate(rough);
 
     // Fresnel energy tint into spec handled later in lighting; here we approximate albedo.
@@ -84,17 +105,20 @@ void main() {
     // This is stable even without depth buffer access.
     float depth = max(0.0, -vWorldPos.y) * waterDepthScale;
 
-    // Absorption by distance.
-    vec3 absorption = beerLambert(waterAbsorptionCoeff, depth);
+    // Absorption by distance using weather-driven absorption
+    vec3 absorption = beerLambert(waterParams.absorptionCoeff, depth);
     albedo *= absorption;
 
     // Foam via normal deviation: sharper -> less foam.
     float foamBase = foamFromSteepness(ndv);
 
-    // Rain ripples add extra micro foam.
-    foamBase *= (1.0 + rainRipple(vWorldPos.xz * 0.5, time, rainStrength) * 0.75);
+    // Weather-driven foam instead of rainStrength
+    float weatherFoam = waterComputeFoam(
+        1.0 - ndv, 5.0, wind.speed, precip, wind, waterParams.shoreWidth
+    );
+    foamBase *= (1.0 + weatherFoam * 0.75);
 
-    float foam = saturate(pow(foamBase, waterFoamPower) * waterFoamStrength);
+    float foam = saturate(pow(foamBase, waterFoamPower) * waterParams.foamStrength);
 
     // Foam increases perceived albedo.
     vec3 foamAlbedo = vec3(0.85, 0.90, 0.95);
@@ -122,4 +146,3 @@ void main() {
     gNormalRough = normalRough;
     gEmissiveAO = emissiveAO;
 }
-
