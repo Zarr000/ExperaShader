@@ -56,4 +56,21 @@ uniform sampler2D gVelocity;
 uniform sampler2D gHiZ;
 uniform float hiZEnabled;
 
+// Minecraft/OptiFine/Iris runtime uniforms
+uniform vec3 sunPosition;
+uniform vec3 moonPosition;
+uniform vec3 sunColor;
+uniform vec3 moonColor;
+uniform vec3 skyColor;
+uniform vec3 fogColor;
+uniform float fogDensity;
+uniform float rainStrength;
+uniform float wetness;
+uniform float worldTime;
+
+// Atmosphere quality control
+uniform float atmosphereQuality;
+uniform float atmosphereLUTResolution;
+uniform float atmosphereSampleCount;
+
 #endif
