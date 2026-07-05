@@ -3,8 +3,8 @@
 // Volumetric clouds pass - produces cloud shadow factor in RGB and alpha.
 
 #include "lib/common.glsl"
-#include "lib/uniforms.glsl"
-#include "lib/noise.glsl"
+#include "lib/common/uniforms.glsl"
+#include "lib/common/noise.glsl"
 
 in vec2 vUV;
 out vec4 FragColor;

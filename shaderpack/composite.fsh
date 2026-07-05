@@ -3,8 +3,9 @@
 // Composite pass: apply SSR/volumetrics and final tone mapping.
 
 #include "lib/common.glsl"
-#include "lib/uniforms.glsl"
-#include "lib/tonemap.glsl"
+#include "lib/common/uniforms.glsl"
+#include "lib/lighting/pbr.glsl"
+#include "lib/post/pipeline.glsl"
 
 in vec2 vUV;
 out vec4 FragColor;
@@ -17,9 +18,7 @@ uniform sampler2D gCloudShadow;
 // SSR output (from SSR pass)
 uniform sampler2D gSSR;
 uniform sampler2D gDepth;
-
-uniform float exposure;
-
+uniform sampler2D gSSGI;
 
 void main() {
     vec3 base = texture2D(gColor, vUV).rgb;
@@ -32,49 +31,31 @@ void main() {
     vec3 ssr = texture2D(gSSR, vUV).rgb;
     float ssrHit = texture2D(gSSR, vUV).a;
 
-    // Apply AO.
     vec3 lit = base * ao;
 
-    // Sky reflection fallback using atmospheric skyColor approximation.
-    // If SSR misses (low hit), blend in sky.
-    // We approximate sky by using fogScatter as a sky-like color source.
     vec3 skyRefl = texture2D(gFogScatter, vUV).rgb;
 
-    // Rough/material reflection filtering handled in SSR pass; here apply view-angle fade.
-    // Normal is not available in composite, so we keep conservative fade.
     float miss = 1.0 - ssrHit;
     vec3 fallback = mix(ssr, skyRefl, miss);
 
-    // SSR contribution weighting: stronger when confident.
     float ssrWeight = mix(0.18, 0.7, ssrHit);
     lit += fallback * ssrWeight;
 
-
-    // Volumetrics.
     lit = mix(lit, fogCol, fogFactor);
-
-    // Better edge handling / reflection fading with fog (reduces SSR popping).
     lit *= mix(1.0, 0.92, fogFactor);
-
-
-    // Cloud shadows.
     lit *= mix(1.0, cloudShadow, 0.75);
 
-    // Shadow confidence weighting hook (if shadow pass is wired).
-    // Currently no dedicated shadow confidence buffer is available in this repo.
-
-
-    // Integrate SSGI diffuse indirect if available.
-    // gSSGI is expected to be the denoised/temporal resolved diffuse GI buffer.
     vec3 ssgi = texture2D(gSSGI, vUV).rgb;
     float ssgiValid = texture2D(gSSGI, vUV).a;
     lit += ssgi * ssgiValid;
 
-    // Tone map.
-    vec3 mapped = acesFilmic(lit * exposure);
+    vec3 hdr = max(lit, vec3(0.0));
+    hdr = applyAutoExposure(hdr, exposure, autoExposure);
+    hdr = applyChromaticAberration(gColor, vUV, hdr, chromaticAberrationStrength);
+    hdr = applyFilmGrain(hdr, vUV, 0.25 + 0.75 * (1.0 - presetLow), time);
+    hdr = applySharpen(gColor, vUV, hdr, taaSharpen * 0.15 + 0.02);
 
-
-    // Gamma.
+    vec3 mapped = acesFilmic(hdr);
     vec3 srgb = linearToSRGB(mapped);
     FragColor = vec4(srgb, 1.0);
 }

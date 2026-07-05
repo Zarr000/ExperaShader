@@ -3,9 +3,8 @@
 // Deferred lighting pass: combines GBuffer with physically-based direct lighting.
 
 #include "lib/common.glsl"
-#include "lib/uniforms.glsl"
-#include "lib/brdf_pbr.glsl"
-#include "lib/tonemap.glsl"
+#include "lib/common/uniforms.glsl"
+#include "lib/lighting/pbr.glsl"
 #include "lib/space_transforms.glsl"
 #include "lib/screen_space.glsl"
 
