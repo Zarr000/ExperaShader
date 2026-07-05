@@ -36,6 +36,10 @@ void main() {
     vec3 N = unpackNormal(nr.rgb);
     float roughness = clamp(nr.a, 0.02, 1.0);
 
+    // Water vs rough surface attenuation (very conservative, based on material ID if bound).
+    // Here we reuse SSR enable gating; production would use a real material mask.
+
+
     // View vector approximation.
     vec3 worldPos = texture2D(gWorldPosDepth, vUV).xyz;
     vec3 V = normalize(vec3(0.0) - worldPos + cameraPosition);
@@ -63,11 +67,18 @@ vec3 march = ssrRayMarch(vec3(0.0), rd, roughness, gDepth, steps, refine);
     float rFac = mix(0.9, 0.2, roughness);
     vec3 refl = scene * rFac;
 
-    // Temporal reprojection approximation: blend with previous SSR.
+    // Temporal accumulation.
+    // If we have a hit, prefer current ray; otherwise keep history to avoid flicker.
     vec3 prev = texture2D(gPrevSSR, vUV).rgb;
-    float temporal = taaFeedback;
 
-    vec3 outCol = mix(refl, prev, clamp((hit * (1.0 - temporal)) + (1.0 - hit) * temporal, 0.0, 1.0));
+    float tBlend = taaFeedback;
+    float histWeight = mix(1.0, 0.25, hit);
+    tBlend = clamp(tBlend * histWeight, 0.02, 0.95);
+
+    // Reflection filtering: slightly blur based on roughness by attenuating SSR strength.
+    float roughAtten = mix(1.0, 0.55, roughness * roughness);
+    vec3 outCol = mix(refl * roughAtten, prev, (1.0 - hit) * tBlend);
+
 
 
     FragColor = vec4(outCol * enable, hit * enable);

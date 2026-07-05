@@ -82,30 +82,32 @@ vec3 ssrRayMarch(
     int maxSteps,
     int refineSteps
 ) {
+
     // Screen-space origin.
     vec2 uv = gl_FragCoord.xy / max(screenSize, vec2(1.0));
 
-
-    // Since we don't have full camera/projection matrices in this include,
-    // we assume caller supplies proper ro/rd in screen-space aligned proxy.
-    // Ray march in uv space with depth compare.
+    // Roughness-aware ray length: smoother surfaces travel further.
+    float rayLen = mix(0.85, 0.25, saturate(roughness));
 
     // Step sizing based on roughness.
     float stepScale = roughStepScale(roughness);
     float t = 0.0;
 
     float hit = 0.0;
-
-    vec2 lastUV = uv;
-    float lastDepth = texture2D(depthTex, uv).r;
     vec2 hitUV = uv;
+
+    float lastDepth = texture2D(depthTex, uv).r;
+    vec2 lastUV = uv;
+
+    // Thickness rejection bias. Larger bias for rough surfaces.
+    float thickness = mix(0.0025, 0.0125, saturate(roughness));
 
     // Hierarchical: far steps are larger by increasing t.
     for (int i = 0; i < maxSteps; i++) {
         float fi = float(i);
 
         float hier = mix(1.9, 0.6, saturate(fi / float(maxSteps)));
-        float dt = (0.25 + fi / float(maxSteps)) * stepScale * hier;
+        float dt = (0.25 + fi / float(maxSteps)) * stepScale * hier * rayLen;
         t += dt;
 
         vec2 stepUV = rd.xy * dt * 0.5;
@@ -114,15 +116,23 @@ vec3 ssrRayMarch(
         float inBounds = step(0.0, uv2.x) * step(0.0, uv2.y) * step(uv2.x, 1.0) * step(uv2.y, 1.0);
         if (inBounds < 0.5) break;
 
-        float sceneDepth = texture2D(depthTex, uv2).r;
+        // Use hierarchical Z depth if enabled, otherwise fall back.
+        float sceneDepth = (hiZEnabled > 0.5) ? sampleHiZDepth(uv2) : texture2D(depthTex, uv2).r;
 
-        // Ray depth proxy: use lastDepth and linear progression.
+
+        // Ray depth proxy: conservative interpolation.
         float rayDepth = mix(lastDepth, sceneDepth, saturate(fi / float(maxSteps)));
+
+        // Penetration test with thickness.
         float diff = sceneDepth - rayDepth;
 
-        if (diff < 0.0) {
+        // Reflection rejection: ignore hits that are too grazing/weak (reduces light leaks).
+        float ndvReject = saturate(abs(dot(normalize(vec3(rd.xy, 0.001)), vec3(0.0, 0.0, 1.0))));
+
+        // Reject if the ray is likely behind or too thin.
+        if (diff < -thickness && ndvReject < 0.999) {
             // Refinement between last and current.
-vec2 refinedUV = refineRayBinarySearch(
+            vec2 refinedUV = refineRayBinarySearch(
                 ro, rd,
                 lastUV, lastDepth,
                 uv2, sceneDepth,
@@ -130,8 +140,11 @@ vec2 refinedUV = refineRayBinarySearch(
                 refineSteps
             );
 
+            // Reflection rejection: filter extremely close-to-edge hits.
+            float ef = edgeFade(refinedUV);
+
             hitUV = refinedUV;
-            hit = 1.0;
+            hit = ef;
             break;
         }
 
@@ -140,12 +153,13 @@ vec2 refinedUV = refineRayBinarySearch(
         uv = uv2;
 
         // Early roughness: if too rough, stop sooner.
-        if (roughness > 0.6 && i > maxSteps / 2) break;
+        if (roughness > 0.65 && i > maxSteps / 2) break;
     }
 
-    float ef = edgeFade(hitUV);
-    return vec3(hitUV, hit * ef);
+    float efOut = edgeFade(hitUV);
+    return vec3(hitUV, hit * efOut);
 }
+
 
 #endif
 
