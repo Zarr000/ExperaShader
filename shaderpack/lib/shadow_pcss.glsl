@@ -2,10 +2,8 @@
 #ifndef SHADOW_PCSS_GLSL
 #define SHADOW_PCSS_GLSL
 
-// PCSS-style shadow filtering helpers (original implementation).
-
-#include "lib/common.glsl"
-#include "lib/uniforms.glsl"
+#include "common/math.glsl"
+#include "common/uniforms.glsl"
 
 uniform sampler2D gShadowMap;
 

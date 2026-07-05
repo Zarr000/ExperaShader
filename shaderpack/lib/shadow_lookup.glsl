@@ -2,10 +2,10 @@
 #ifndef SHADOW_LOOKUP_GLSL
 #define SHADOW_LOOKUP_GLSL
 
-#include "lib/common.glsl"
-#include "lib/uniforms.glsl"
-#include "lib/shadow_pcss.glsl"
-#include "lib/csm.glsl"
+#include "common/math.glsl"
+#include "common/uniforms.glsl"
+#include "shadow_pcss.glsl"
+#include "csm.glsl"
 
 // These samplers/matrices are pipeline-specific; we provide conservative defaults.
 uniform sampler2D gShadowMap0;

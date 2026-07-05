@@ -2,10 +2,9 @@
 #ifndef DEPTH_GLSL
 #define DEPTH_GLSL
 
-// Depth reconstruction helpers.
+#include "common/math.glsl"
 
 float linearizeDepth(float depthNonLinear, float zNear, float zFar) {
-    // Converts depth from [0,1] non-linear to linear view-space depth.
     float z = depthNonLinear * 2.0 - 1.0;
     return (2.0 * zNear * zFar) / (zFar + zNear - z * (zFar - zNear));
 }

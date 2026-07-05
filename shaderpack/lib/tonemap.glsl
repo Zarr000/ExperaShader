@@ -2,6 +2,8 @@
 #ifndef TONEMAP_GLSL
 #define TONEMAP_GLSL
 
+#include "common/color.glsl"
+
 vec3 acesFilmic(vec3 x) {
     const float a = 2.51;
     const float b = 0.03;
