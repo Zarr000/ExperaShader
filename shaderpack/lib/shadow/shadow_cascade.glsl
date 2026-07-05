@@ -6,6 +6,10 @@
 
 uniform vec3 csmSplitSums;
 uniform vec3 shadowLightDirection;
+uniform mat4 shadowProj0;
+uniform mat4 shadowProj1;
+uniform mat4 shadowProj2;
+uniform mat4 shadowView;
 
 int shadowChooseCascade(float viewDepth) {
     if (viewDepth < csmSplitSums.x) return 0;

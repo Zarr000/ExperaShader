@@ -15,20 +15,49 @@ vec2 shadowPoissonDisk[16] = vec2[16](
     vec2(0.19984126, 0.78641367), vec2(0.14383161, -0.14100790)
 );
 
+vec2 shadowRotateOffset(vec2 offset, float angle) {
+    float c = cos(angle);
+    float s = sin(angle);
+    return vec2(c * offset.x - s * offset.y, s * offset.x + c * offset.y);
+}
+
 float shadowPcf(sampler2D smap, vec2 uv, float compareDepth, float bias, float radius, int taps) {
     float occ = 0.0;
-    int count = min(taps, 16);
+    int count = clamp(taps, 1, 16);
+    float angle = fract(sin(float(count) * 12.9898) * 43758.5453) * 6.2831853;
+
     for (int i = 0; i < 16; i++) {
         if (i >= count) break;
-        vec2 offset = shadowPoissonDisk[i] * radius;
+        vec2 offset = shadowRotateOffset(shadowPoissonDisk[i], angle) * radius;
         occ += shadowSampleCompare(smap, uv + offset, compareDepth, bias);
     }
+
     return occ / float(max(count, 1));
 }
 
-float shadowPcss(sampler2D smap, vec2 uv, float compareDepth, float bias, float radius, int taps, float lightSize) {
-    float occ = shadowPcf(smap, uv, compareDepth, bias, radius, taps);
-    return mix(occ, occ * (1.0 - lightSize * 0.15), 0.35);
+float shadowPcss(sampler2D smap, vec2 uv, float compareDepth, float bias, float radius, int taps, float blockerSearchRadius, float lightSize) {
+    float blockerDepth = 0.0;
+    float blockerCount = 0.0;
+    int count = clamp(taps / 2, 2, 8);
+
+    for (int i = 0; i < 16; i++) {
+        if (i >= count) break;
+        vec2 offset = shadowPoissonDisk[i] * blockerSearchRadius;
+        float sampleDepth = shadowSampleDepth(smap, uv + offset);
+        if (sampleDepth < compareDepth - bias) {
+            blockerDepth += sampleDepth;
+            blockerCount += 1.0;
+        }
+    }
+
+    if (blockerCount <= 0.0) {
+        return shadowPcf(smap, uv, compareDepth, bias, radius, taps);
+    }
+
+    float blockerAvg = blockerDepth / max(blockerCount, 1.0);
+    float penumbra = max((compareDepth - blockerAvg) * lightSize, 0.0);
+    float adaptedRadius = radius + penumbra * 0.35;
+    return shadowPcf(smap, uv, compareDepth, bias, adaptedRadius, taps);
 }
 
 #endif
