@@ -41,6 +41,7 @@ void main() {
     // Clamp to avoid accidental NaNs/overexposure from intermediate passes.
     c = clamp(c, vec3(0.0), vec3(1.0));
     FragColor = vec4(c, 1.0);
+
 }
 
 

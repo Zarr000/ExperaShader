@@ -60,6 +60,10 @@ void main() {
     // Cloud shadows.
     lit *= mix(1.0, cloudShadow, 0.75);
 
+    // Shadow confidence weighting hook (if shadow pass is wired).
+    // Currently no dedicated shadow confidence buffer is available in this repo.
+
+
     // Integrate SSGI diffuse indirect if available.
     // gSSGI is expected to be the denoised/temporal resolved diffuse GI buffer.
     vec3 ssgi = texture2D(gSSGI, vUV).rgb;
