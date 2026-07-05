@@ -1,6 +1,6 @@
 #version 150
 
-// FXAA fullscreen triangle vertex shader
+// Screen-space reflections fullscreen triangle vertex shader.
 
 out vec2 vUV;
 

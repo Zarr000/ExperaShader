@@ -1,7 +1,5 @@
 #version 150
 
-// FXAA (fast approximate anti-aliasing) - original implementation inspired by common publicly known approach.
-
 #include "lib/common.glsl"
 #include "lib/uniforms.glsl"
 
@@ -10,49 +8,47 @@ out vec4 FragColor;
 
 uniform sampler2D gColor;
 
-vec3 fxaaSample(vec2 uv) {
-    return texture2D(gColor, uv).rgb;
-}
-
-float luma(vec3 c) {
-    return dot(c, vec3(0.2126, 0.7152, 0.0722));
+vec3 luma(vec3 c) {
+    float Y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    return vec3(Y);
 }
 
 void main() {
+    float enable = step(0.5, taaEnabled); // reuse enable for toggling if no separate uniform
     vec2 texel = 1.0 / max(screenSize, vec2(1.0));
 
-    vec3 rgbNW = fxaaSample(vUV + vec2(-texel.x, -texel.y));
-    vec3 rgbNE = fxaaSample(vUV + vec2( texel.x, -texel.y));
-    vec3 rgbSW = fxaaSample(vUV + vec2(-texel.x,  texel.y));
-    vec3 rgbSE = fxaaSample(vUV + vec2( texel.x,  texel.y));
-    vec3 rgbM  = fxaaSample(vUV);
+    vec3 rgbM = texture2D(gColor, vUV).rgb;
+    vec3 rgbNW = texture2D(gColor, vUV + vec2(-texel.x, -texel.y)).rgb;
+    vec3 rgbNE = texture2D(gColor, vUV + vec2(texel.x, -texel.y)).rgb;
+    vec3 rgbSW = texture2D(gColor, vUV + vec2(-texel.x, texel.y)).rgb;
+    vec3 rgbSE = texture2D(gColor, vUV + vec2(texel.x, texel.y)).rgb;
 
-    float lNW = luma(rgbNW);
-    float lNE = luma(rgbNE);
-    float lSW = luma(rgbSW);
-    float lSE = luma(rgbSE);
-    float lM  = luma(rgbM);
+    vec3 lumaM = luma(rgbM);
+    vec3 lumaNW = luma(rgbNW);
+    vec3 lumaNE = luma(rgbNE);
+    vec3 lumaSW = luma(rgbSW);
+    vec3 lumaSE = luma(rgbSE);
 
-    float lMin = min(lM, min(min(lNW, lNE), min(lSW, lSE)));
-    float lMax = max(lM, max(max(lNW, lNE), max(lSW, lSE)));
+    float lumaMin = min(lumaM.r, min(min(lumaNW.r, lumaNE.r), min(lumaSW.r, lumaSE.r)));
+    float lumaMax = max(lumaM.r, max(max(lumaNW.r, lumaNE.r), max(lumaSW.r, lumaSE.r)));
 
-    // Edge detection
-    vec2 dir;
-    dir.x = -((lNW + lNE) - (lSW + lSE));
-    dir.y =  ((lNW + lSW) - (lNE + lSE));
+    // Edge direction.
+    float dirX = -((lumaNW.r + lumaNE.r) - (lumaSW.r + lumaSE.r));
+    float dirY =  ((lumaNW.r + lumaSW.r) - (lumaNE.r + lumaSE.r));
 
-    float dirReduce = max((lNW + lNE + lSW + lSE) * 0.25 * 0.0078125, 1.0/128.0);
-    float rcpDirMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + dirReduce);
-    dir = clamp(dir * rcpDirMin, vec2(-8.0), vec2(8.0)) * texel;
+    float dirReduce = max((lumaNW.r + lumaNE.r + lumaSW.r + lumaSE.r) * 0.25 * 0.03125, 1e-6);
+    float rcpDirMin = 1.0 / (min(abs(dirX), abs(dirY)) + dirReduce);
+    vec2 dir = clamp(vec2(dirX, dirY) * rcpDirMin, vec2(-8.0), vec2(8.0)) * texel;
 
-    vec3 rgbA = 0.5 * (fxaaSample(vUV + dir * (1.0/3.0 - 0.5)) + fxaaSample(vUV + dir * (2.0/3.0 - 0.5)));
-    vec3 rgbB = rgbA * 0.5 + 0.25 * (fxaaSample(vUV + dir * -0.5) + fxaaSample(vUV + dir * 0.5));
+    // Sample along edge.
+    vec3 rgbA = 0.5 * (texture2D(gColor, vUV + dir * (1.0 / 3.0 - 0.5)).rgb + texture2D(gColor, vUV + dir * (2.0 / 3.0 - 0.5)).rgb);
+    vec3 rgbB = rgbA * 0.5 + 0.25 * (texture2D(gColor, vUV + dir * -0.5).rgb + texture2D(gColor, vUV + dir * 0.5).rgb);
 
-    float lA = luma(rgbA);
-    float lB = luma(rgbB);
+    float lumaB = dot(rgbB, vec3(0.2126, 0.7152, 0.0722));
+    vec3 outCol = (lumaB < lumaMin || lumaB > lumaMax) ? rgbA : rgbB;
 
-    vec3 outRGB = (lB < lMin || lB > lMax) ? rgbA : rgbB;
-
-    FragColor = vec4(outRGB, 1.0);
+    // If enable is 0, bypass.
+    outCol = mix(rgbM, outCol, enable);
+    FragColor = vec4(outCol, 1.0);
 }
 

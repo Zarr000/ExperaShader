@@ -1,6 +1,6 @@
 #version 150
 
-// FXAA fullscreen triangle vertex shader
+// Hi-Z mip level vertex shader.
 
 out vec2 vUV;
 

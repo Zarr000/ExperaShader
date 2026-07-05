@@ -1,6 +1,6 @@
 #version 150
 
-// FXAA fullscreen triangle vertex shader
+// Fullscreen triangle vertex shader (velocity/history resolve)
 
 out vec2 vUV;
 

@@ -48,14 +48,32 @@ uniform float taaEnabled;
 uniform float taaFeedback;
 uniform float taaSharpen;
 
-// SSR
-uniform float ssrEnabled;
-uniform float ssrQuality;
+// Previous frame matrices / camera
+uniform mat4 previousViewProjection;
+uniform mat4 currentViewProjection;
+uniform vec3 previousCameraPosition;
+uniform vec3 cameraPosition;
+
+// Motion vectors
+uniform float motionBlurEnabled;
+uniform float motionBlurStrength;
+uniform float velocityClamp;
+
+// History samplers (names used by resolve passes)
+uniform sampler2D gPrevSSR;
+uniform sampler2D gHistoryPrev;
+uniform sampler2D gPrevVelocity;
+uniform sampler2D gVelocity;
 
 // SSAO
 uniform float ssaoEnabled;
 uniform float ssaoRadius;
 uniform float ssaoBias;
+
+// SSR
+uniform float ssrEnabled;
+uniform float ssrQuality;
+
 
 // Volumetrics
 uniform float cloudsEnabled;
@@ -69,5 +87,10 @@ uniform float shadowQuality;
 uniform float contactShadowEnabled;
 uniform float contactShadowStrength;
 
+// Hi-Z / depth pyramid
+uniform sampler2D gHiZ;
+uniform float hiZEnabled;
+
 #endif
+
 

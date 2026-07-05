@@ -1,6 +1,6 @@
 #version 150
 
-// FXAA fullscreen triangle vertex shader
+// Hi-Z base level from linear depth.
 
 out vec2 vUV;
 

@@ -1,6 +1,6 @@
 #version 150
 
-// Temporal anti-aliasing fullscreen pass.
+// TAA fullscreen triangle vertex shader
 
 out vec2 vUV;
 

@@ -78,7 +78,9 @@ void main() {
     vec3 colSun = PBR_Lit(albedo, metallic, roughness, ao, N, V, Lsun, sunColor, sunIntensity);
     vec3 colMoon = PBR_Lit(albedo, metallic, roughness, ao, N, V, Lmoon, moonColor, moonIntensity);
 
-    vec3 direct = mix(colMoon * (0.25 + 0.75 * day), colSun, day);
+    // Day-night blend: scale moon in daylight down smoothly.
+    vec3 direct = mix(colMoon * (0.06 + 0.94 * (1.0 - day)), colSun, day);
+
 
     // Ambient / skylight approximation.
     vec3 F0 = mix(vec3(0.04), albedo, metallic);

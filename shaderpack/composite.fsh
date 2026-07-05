@@ -14,10 +14,12 @@ uniform sampler2D gAO;
 uniform sampler2D gFogScatter;
 uniform sampler2D gFogFactor;
 uniform sampler2D gCloudShadow;
+// SSR output (from SSR pass)
 uniform sampler2D gSSR;
 uniform sampler2D gDepth;
 
 uniform float exposure;
+
 
 void main() {
     vec3 base = texture2D(gColor, vUV).rgb;
