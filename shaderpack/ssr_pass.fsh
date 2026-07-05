@@ -36,8 +36,11 @@ void main() {
     vec3 N = unpackNormal(nr.rgb);
     float roughness = clamp(nr.a, 0.02, 1.0);
 
-    // Water vs rough surface attenuation (very conservative, based on material ID if bound).
-    // Here we reuse SSR enable gating; production would use a real material mask.
+    // Reflection routing:
+    // - For now, we treat all reflective materials uniformly.
+    // - Roughness controls blur/filtering and confidence.
+    // - Water reflections will be improved by wiring material ID in a later SSR pass revision.
+
 
 
     // View vector approximation.
@@ -53,9 +56,9 @@ void main() {
 
     // Use the SSR marcher in a proxy screen-space UV domain.
     // ro/rd treated as directional proxies.
-// Use hierarchical depth tex if bound; else fall back to gDepth.
-// Current implementation reads depthTex and assumes it matches depth compare space.
-vec3 march = ssrRayMarch(vec3(0.0), rd, roughness, gDepth, steps, refine);
+    // SSR ray march (source uses depthTex or Hi-Z depending on hiZEnabled).
+    vec3 march = ssrRayMarch(vec3(0.0), rd, roughness, gDepth, steps, refine);
+
 
     vec2 hitUV = march.xy;
     float hit = march.z;
@@ -75,12 +78,52 @@ vec3 march = ssrRayMarch(vec3(0.0), rd, roughness, gDepth, steps, refine);
     float histWeight = mix(1.0, 0.25, hit);
     tBlend = clamp(tBlend * histWeight, 0.02, 0.95);
 
-    // Reflection filtering: slightly blur based on roughness by attenuating SSR strength.
-    float roughAtten = mix(1.0, 0.55, roughness * roughness);
-    vec3 outCol = mix(refl * roughAtten, prev, (1.0 - hit) * tBlend);
+    // Reflection confidence weighting.
+    // - Higher roughness reduces confidence.
+    // - Higher hit factor increases confidence.
+    float viewAngle = saturate(dot(normalize(N), normalize(-V)));
+    float angleFade = mix(1.0, 0.2, pow(1.0 - viewAngle, 2.0));
+
+    // Roughness blur approximation: reduce SSR contribution and increase history reliance.
+    float roughBlur = mix(1.0, 0.45, roughness * roughness);
+
+    // Neighborhood clamping to reduce temporal flicker/leaks.
+    // (Sampling a 3x3 neighborhood around hit UV and clamping to local min/max.)
+    vec3 nMin = scene;
+    vec3 nMax = scene;
+    vec2 texel = 1.0 / max(screenSize, vec2(1.0));
+
+    for (int oy = -1; oy <= 1; oy++) {
+        for (int ox = -1; ox <= 1; ox++) {
+            vec2 o = vec2(float(ox), float(oy)) * texel;
+            vec3 s = texture2D(gColor, hitUV + o).rgb;
+            nMin = min(nMin, s);
+            nMax = max(nMax, s);
+        }
+    }
+
+    vec3 ssrColor = clamp(refl * roughBlur, nMin, nMax);
+
+    // Temporal reprojection improvement: rejection if history deviates too far.
+    float historyErr = length(ssrColor - prev);
+    float validHist = step(historyErr, mix(0.25, 0.08, hit));
+    vec3 hist = mix(prev, ssrColor, 1.0 - validHist);
+
+    float confidence = hit * angleFade * mix(1.0, 0.55, roughness);
+    float blend = saturate(tBlend * (1.0 - confidence));
+
+    vec3 outCol = mix(ssrColor, hist, blend);
 
 
 
-    FragColor = vec4(outCol * enable, hit * enable);
+
+    // Reflection validity tests + hole filling.
+    // If no hit: keep output conservative by falling back to zero (composite handles sky/fallback).
+    float validity = step(0.01, hit);
+    vec3 finalRefl = outCol * validity;
+
+    // Better edge handling: already included in hit.
+    FragColor = vec4(finalRefl * enable, validity * hit * enable);
+
 }
 

@@ -97,8 +97,12 @@ void main() {
 
     vec3 emiss = albedo * emissive;
 
+    // SSR injection hook: deferred pass can output base radiance only.
+    // SSR is applied in composite.fsh to preserve stability and avoid double tone-mapping.
+
     vec3 radiance = direct + ambient + emiss;
 
     FragColor = vec4(radiance, 1.0);
+
 }
 

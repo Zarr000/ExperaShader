@@ -30,15 +30,32 @@ void main() {
     float cloudShadow = texture2D(gCloudShadow, vUV).a;
 
     vec3 ssr = texture2D(gSSR, vUV).rgb;
+    float ssrHit = texture2D(gSSR, vUV).a;
 
     // Apply AO.
     vec3 lit = base * ao;
 
-    // SSR mix (weak to stay stable without history).
-    lit += ssr * 0.35;
+    // Sky reflection fallback using atmospheric skyColor approximation.
+    // If SSR misses (low hit), blend in sky.
+    // We approximate sky by using fogScatter as a sky-like color source.
+    vec3 skyRefl = texture2D(gFogScatter, vUV).rgb;
+
+    // Rough/material reflection filtering handled in SSR pass; here apply view-angle fade.
+    // Normal is not available in composite, so we keep conservative fade.
+    float miss = 1.0 - ssrHit;
+    vec3 fallback = mix(ssr, skyRefl, miss);
+
+    // SSR contribution weighting: stronger when confident.
+    float ssrWeight = mix(0.18, 0.7, ssrHit);
+    lit += fallback * ssrWeight;
+
 
     // Volumetrics.
     lit = mix(lit, fogCol, fogFactor);
+
+    // Better edge handling / reflection fading with fog (reduces SSR popping).
+    lit *= mix(1.0, 0.92, fogFactor);
+
 
     // Cloud shadows.
     lit *= mix(1.0, cloudShadow, 0.75);
