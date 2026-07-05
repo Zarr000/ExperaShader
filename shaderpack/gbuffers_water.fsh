@@ -6,6 +6,8 @@
 #include "lib/common.glsl"
 #include "lib/uniforms.glsl"
 #include "lib/water_physics.glsl"
+#include "lib/material/material_data.glsl"
+#include "lib/material/material_encode.glsl"
 
 in vec3 vWorldPos;
 in vec3 vNormal;
@@ -102,11 +104,22 @@ void main() {
     // Use emissive as minimal hint, controlled by foam to avoid artifacts.
     float emissive = foam * 0.04;
 
+    MaterialData material = materialDefault();
+    material.albedo = albedo;
+    material.normal = N;
+    material.roughness = rough;
+    material.metallic = waterMetallic;
+    material.ao = ao;
+    material.emission = emissive;
+
     gWorldPosDepth = vec4(vWorldPos, 1.0);
 
-    float metallic = waterMetallic;
-    gAlbedoMetal = vec4(albedo, metallic);
-    gNormalRough = vec4(packNormal(N), rough);
-    gEmissiveAO = vec4(vec3(emissive), ao);
+    vec4 albedoMetal;
+    vec4 normalRough;
+    vec4 emissiveAO;
+    materialEncodeToGBuffer(material, albedoMetal, normalRough, emissiveAO);
+    gAlbedoMetal = albedoMetal;
+    gNormalRough = normalRough;
+    gEmissiveAO = emissiveAO;
 }
 

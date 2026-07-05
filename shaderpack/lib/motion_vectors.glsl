@@ -12,9 +12,5 @@ vec2 velocityFromClip(vec4 currClip, vec4 prevClip) {
     return currUV - prevUV;
 }
 
-vec2 safeClampUV(vec2 uv) {
-    return clamp(uv, vec2(0.0), vec2(1.0));
-}
-
 #endif
 

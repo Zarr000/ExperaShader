@@ -19,4 +19,8 @@ mat3 mat3FromColumns(vec3 c0, vec3 c1, vec3 c2) {
     return mat3(c0, c1, c2);
 }
 
+vec2 safeClampUV(vec2 uv) {
+    return clamp(uv, vec2(0.0), vec2(1.0));
+}
+
 #endif

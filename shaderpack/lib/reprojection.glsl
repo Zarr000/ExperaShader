@@ -15,9 +15,5 @@ vec2 projectUV(mat4 currViewProj, mat4 prevViewProj, vec3 worldPos) {
     return prevUV;
 }
 
-vec2 safeClampUV(vec2 uv) {
-    return clamp(uv, vec2(0.0), vec2(1.0));
-}
-
 #endif
 

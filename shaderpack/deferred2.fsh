@@ -4,6 +4,8 @@
 
 #include "lib/common.glsl"
 #include "lib/common/uniforms.glsl"
+#include "lib/material/material_data.glsl"
+#include "lib/material/material_decode.glsl"
 
 in vec2 vUV;
 out vec4 FragColor;

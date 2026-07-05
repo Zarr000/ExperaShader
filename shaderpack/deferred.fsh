@@ -7,6 +7,9 @@
 #include "lib/lighting/pbr.glsl"
 #include "lib/space_transforms.glsl"
 #include "lib/screen_space.glsl"
+#include "lib/material/material_data.glsl"
+#include "lib/material/material_decode.glsl"
+#include "lib/material/material_surface.glsl"
 
 in vec2 vUV;
 out vec4 FragColor;
@@ -33,10 +36,6 @@ uniform float ambientIntensity;
 // Camera
 uniform vec3 cameraPosition;
 
-vec3 unpackNormal(vec3 packed) {
-    return normalize(packed * 2.0 - 1.0);
-}
-
 float computeDayFactor(vec3 dir) {
     // dir.y ~ 1 => day. Smooth for sunrise/sunset.
     float y = saturate(dir.y);
@@ -50,14 +49,13 @@ void main() {
     vec4 ea = texture2D(gEmissiveAO, vUV);
     vec4 wp = texture2D(gWorldPosDepth, vUV);
 
-    vec3 albedo = albm.rgb;
-    float metallic = albm.a;
-
-    vec3 N = unpackNormal(nr.rgb);
-    float roughness = clamp(nr.a, 0.02, 1.0);
-
-    float ao = clamp(ea.a, 0.0, 1.0);
-    float emissive = ea.r;
+    MaterialData material = materialDecodeFromGBuffer(albm, nr, ea);
+    vec3 albedo = material.albedo;
+    float metallic = material.metallic;
+    vec3 N = material.normal;
+    float roughness = material.roughness;
+    float ao = material.ao;
+    float emissive = material.emission;
 
     // World position reconstruction
     vec3 worldPos = wp.xyz;
@@ -82,7 +80,7 @@ void main() {
 
 
     // Ambient / skylight approximation.
-    vec3 F0 = mix(vec3(0.04), albedo, metallic);
+    vec3 F0 = materialF0(material);
     vec3 diffuse = BRDF_DiffuseLambert(albedo);
 
     // Hemisphere ambient: sky for N.y>0, ground for below.

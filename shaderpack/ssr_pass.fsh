@@ -6,6 +6,8 @@
 #include "lib/common.glsl"
 #include "lib/uniforms.glsl"
 #include "lib/ssr.glsl"
+#include "lib/material/material_data.glsl"
+#include "lib/material/material_decode.glsl"
 
 in vec2 vUV;
 out vec4 FragColor;
@@ -23,18 +25,15 @@ uniform float ssrQuality;
 
 uniform float time;
 
-vec3 unpackNormal(vec3 packed) {
-    return normalize(packed * 2.0 - 1.0);
-}
-
 vec3 reflectView(vec3 N, vec3 V) {
     return normalize(reflect(-V, N));
 }
 
 void main() {
     vec4 nr = texture2D(gNormalRough, vUV);
-    vec3 N = unpackNormal(nr.rgb);
-    float roughness = clamp(nr.a, 0.02, 1.0);
+    MaterialData material = materialDecodeFromNormalRough(nr);
+    vec3 N = material.normal;
+    float roughness = material.roughness;
 
     // Reflection routing:
     // - For now, we treat all reflective materials uniformly.

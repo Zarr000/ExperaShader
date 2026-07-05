@@ -5,6 +5,8 @@
 
 #include "lib/common.glsl"
 #include "lib/uniforms.glsl"
+#include "lib/material/material_data.glsl"
+#include "lib/material/material_encode.glsl"
 
 in vec3 vWorldPos;
 in vec3 vNormal;
@@ -74,10 +76,22 @@ void main() {
 
     // Depth packing: we store world position and approximate depth using view-space z.
     // In deferred passes, depth will be fetched separately by depth buffer.
+    MaterialData material = materialDefault();
+    material.albedo = albedo;
+    material.normal = N;
+    material.roughness = roughness;
+    material.metallic = metallic;
+    material.ao = ao;
+    material.emission = emissive;
+
     gWorldPosDepth = vec4(vWorldPos, 1.0);
 
-    gAlbedoMetal = vec4(albedo, metallic);
-    gNormalRough = vec4(packNormal(N), roughness);
-    gEmissiveAO = vec4(vec3(emissive), ao);
+    vec4 albedoMetal;
+    vec4 normalRough;
+    vec4 emissiveAO;
+    materialEncodeToGBuffer(material, albedoMetal, normalRough, emissiveAO);
+    gAlbedoMetal = albedoMetal;
+    gNormalRough = normalRough;
+    gEmissiveAO = emissiveAO;
 }
 

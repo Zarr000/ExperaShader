@@ -2,6 +2,8 @@
 
 #include "lib/common.glsl"
 #include "lib/uniforms.glsl"
+#include "lib/material/material_data.glsl"
+#include "lib/material/material_decode.glsl"
 
 in vec2 vUV;
 out vec4 FragColor;
@@ -16,14 +18,11 @@ uniform sampler2D gMotion;           // motion vectors
 // Output
 uniform float giTemporal;
 
-vec3 decodeNormal(vec3 packed) {
-    return normalize(packed * 2.0 - 1.0);
-}
-
 void main() {
     vec3 gi = texture2D(gSSGITemp, vUV).rgb;
     float depthC = texture2D(gLinearDepthTex, vUV).r;
-    vec3 N = decodeNormal(texture2D(gNormalRoughTex, vUV).rgb);
+    MaterialData material = materialDecodeFromNormalRough(texture2D(gNormalRoughTex, vUV));
+    vec3 N = material.normal;
 
     // Reproject history
     vec2 motion = texture2D(gMotion, vUV).xy;
