@@ -6,9 +6,8 @@
 #include "renderer_graph.glsl"
 #include "renderer_resource.glsl"
 
-// Renderer validation system
+// Renderer validation with dependency checking
 
-// Validation result structure
 struct ValidationResult {
     bool valid;
     float missingDependencies;
@@ -18,6 +17,9 @@ struct ValidationResult {
     float invalidHistory;
     float samplerConflicts;
     float compatibilityWarnings;
+    float duplicateEvaluations;
+    float resourceConflicts;
+    float deadPasses;
 };
 
 // Initialize validation result
@@ -31,18 +33,28 @@ ValidationResult rendererValidationInit() {
     v.invalidHistory = 0.0;
     v.samplerConflicts = 0.0;
     v.compatibilityWarnings = 0.0;
+    v.duplicateEvaluations = 0.0;
+    v.resourceConflicts = 0.0;
+    v.deadPasses = 0.0;
     return v;
 }
 
-// Validate render graph
+// Validate render graph dependencies
 ValidationResult rendererValidateGraph(RenderGraph g) {
     ValidationResult result = rendererValidationInit();
 
     // Check for missing dependencies
     for (int i = 0; i < 16; i++) {
         if (float(i) >= g.nodeCount) break;
-        if (g.nodes[i].inputCount > 0 && !g.nodes[i].enabled) {
-            result.missingDependencies += 1.0;
+        for (int j = 0; j < 4; j++) {
+            float dep = g.nodes[i].dependencies[j];
+            if (dep < 0.0) break;
+            bool found = false;
+            for (int k = 0; k < 16; k++) {
+                if (float(k) >= g.nodeCount) break;
+                if (g.nodes[k].id == dep) found = true;
+            }
+            if (!found) result.missingDependencies += 1.0;
         }
     }
 
@@ -65,10 +77,21 @@ ValidationResult rendererValidateGraph(RenderGraph g) {
         if (!used) result.unusedResources += 1.0;
     }
 
+    // Check for dead passes (no outputs)
+    for (int i = 0; i < 16; i++) {
+        if (float(i) >= g.nodeCount) break;
+        if (g.nodes[i].enabled && g.nodes[i].outputCount == 0.0) {
+            result.deadPasses += 1.0;
+        }
+    }
+
     // Overall validity
     result.valid = (result.missingDependencies == 0.0 &&
                     result.duplicateOutputs == 0.0 &&
-                    result.circularReferences == 0.0);
+                    result.circularReferences == 0.0 &&
+                    result.duplicateEvaluations == 0.0 &&
+                    result.resourceConflicts == 0.0 &&
+                    result.deadPasses == 0.0);
 
     return result;
 }

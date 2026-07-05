@@ -1,7 +1,7 @@
 #version 150
 
-// Composite pass: apply SSR/volumetrics, cloud rendering, water composite, final tone mapping.
-// Integrated with Weather Engine V2, Atmosphere Engine V2, Cloud Engine V2, Water Renderer V2.
+// Composite pass: Renderer Core V2 orchestration point
+// Integrates all subsystems via render graph execution
 
 #include "lib/common.glsl"
 #include "lib/common/uniforms.glsl"
@@ -19,6 +19,8 @@
 #include "lib/weather/weather_util.glsl"
 #include "lib/water/water_common.glsl"
 #include "lib/water/water_util.glsl"
+#include "lib/renderer/renderer_util.glsl"
+#include "lib/renderer/renderer_resource.glsl"
 
 in vec2 vUV;
 out vec4 FragColor;
@@ -34,7 +36,16 @@ uniform sampler2D gDepth;
 uniform sampler2D gSSGI;
 uniform sampler2D gWorldPosDepth;
 
+// Renderer Core state
+RendererState gRenderer;
+
 void main() {
+    // Initialize Renderer Core once per frame (first fragment)
+    if (gl_FragCoord.x < 1.0 && gl_FragCoord.y < 1.0) {
+        gRenderer = rendererInit(frameTimeCounter, 0.016, frameTimeCounter);
+        rendererUpdateResourceLifetime(gRenderer.graph, RESOURCE_ID_COLOR, RESOURCE_STATE_READ);
+    }
+
     vec3 base = texture2D(gColor, vUV).rgb;
 
     float ao = texture2D(gAO, vUV).a;
@@ -63,7 +74,7 @@ void main() {
     float ssgiValid = texture2D(gSSGI, vUV).a;
     lit += ssgi * ssgiValid;
 
-    // Weather Engine integration: compute weather frame once
+    // Weather Engine integration: single evaluation per frame
     WeatherFrame weather = weatherComputeFrame(frameTimeCounter, 0.016, cameraPosition);
 
     // Atmosphere Engine integration
@@ -88,10 +99,11 @@ void main() {
 
     // Modulate atmosphere with weather
     p = weatherApplyToAtmosphere(p, weather.lighting, weather.state);
+    rendererUpdateResourceLifetime(gRenderer.graph, RESOURCE_ID_HISTORY_TAA, RESOURCE_STATE_READ);
 
     // Volumetric Cloud Rendering
     if (cloudShouldRender(cloudsQuality)) {
-        CloudParameters c = weatherDrivenClouds(weather.state, weather.wind, frameTimeCounter);
+        CloudParameters c = weatherDrivenClouds(waterApplyToAtmosphere(p, weather.lighting, weather.state), r, weather.state, weather.wind, frameTimeCounter);
         CloudRaymarchConfig cfg = cloudRaymarchConfig(c);
 
         float depth = texture2D(gDepth, vUV).r;
@@ -99,7 +111,7 @@ void main() {
         vec3 viewDir = normalize(viewPos);
         vec3 worldViewDir = normalize(mat3(gbufferModelViewInverse) * viewDir);
 
-        float maxDist = 500.0;
+        float maxDist = waterApplyToAtmosphere(p, weather.lighting, weather.state).fogDensity * 100.0;
         CloudRaymarchResult cloudResult = cloudRaymarch(
             cameraPosition, worldViewDir, maxDist, p, r, c, cfg,
             frameTimeCounter, vUV
@@ -117,26 +129,26 @@ void main() {
 
         float cloudAlpha = cloudCompositingAlpha(cloudResult.transmittance);
         lit = cloudComposite(lit, cloudRadiance, cloudAlpha);
+
+        rendererUpdateResourceLifetime(gRenderer.graph, RESOURCE_ID_CLOUD, RESOURCE_STATE_WRITTEN);
+        rendererUpdateResourceLifetime(gRenderer.graph, RESOURCE_ID_HISTORY_CLOUD, RESOURCE_STATE_WRITTEN);
     }
 
-    // Water Renderer integration: composite water over scene
+    // Water Renderer integration
     if (waterQualityLevel() >= WATER_PERFORMANCE) {
         vec4 wp = texture2D(gWorldPosDepth, vUV);
         vec3 worldPos = wp.xyz;
 
-        // Sample water surface
         float waterDepth = texture2D(gDepth, vUV).r;
         vec3 viewPos = reconstructViewPosition(waterDepth, vUV, gbufferProjection, screenSize);
         vec3 viewDir = normalize(viewPos);
         float distance = length(viewPos);
 
-        // Water surface sample from Weather Engine
         WaterSurfaceSample waterSample = waterSampleSurface(
             worldPos.xz, worldPos, frameTimeCounter, distance,
             weather, p, r, waterQualityLevel()
         );
 
-        // Water reflection
         vec3 ssrCol = texture2D(gSSR, vUV).rgb;
         float ssrHit = texture2D(gSSR, vUV).a;
         WaterReflection waterRef = waterComputeReflection(
@@ -144,34 +156,31 @@ void main() {
             p, r, ssrCol, ssrHit, lit, waterSample.roughness
         );
 
-        // Water refraction
         WaterRefraction waterRefr = waterComputeRefraction(
             vUV, waterSample.normal, viewDir,
             waterSample.depth, waterSample.roughness, waterQualityLevel()
         );
 
-        // Water scattering
         vec3 lightDir = normalize(r.sunDirection);
         WaterScattering waterScatter = waterComputeScattering(
             lightDir, viewDir, waterSample.normal,
             waterSample.albedo, waterSample.depth, p, r, weather.fog
         );
 
-        // Water caustics
         float shoreDist = 5.0;
         float caustic = waterCaustics(worldPos.xz, waterSample.depth, shoreDist,
                                      waterDefaultParams().causticStrength, frameTimeCounter);
 
-        // Combine water
         vec3 waterColor = waterSurfaceBRDF(
             lightDir, viewDir, waterSample.normal, waterSample.albedo,
             waterSample.roughness, waterRef.combined, waterScatter.singleScatter,
             waterSample.fresnel
         );
 
-        // Apply water color to scene based on water alpha
         float waterAlpha = waterCompositingAlpha(1.0);
         lit = mix(lit, waterColor, waterAlpha * 0.5);
+
+        rendererUpdateResourceLifetime(gRenderer.graph, RESOURCE_ID_WATER, RESOURCE_STATE_WRITTEN);
     }
 
     vec3 hdr = max(lit, vec3(0.0));

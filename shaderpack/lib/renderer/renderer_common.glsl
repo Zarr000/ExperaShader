@@ -5,10 +5,10 @@
 #include "../common/math.glsl"
 #include "../common/uniforms.glsl"
 
-// Renderer Core V2 - Render Graph system
-// Orchestrates existing passes without replacing them
+// Renderer Core V2 - Runtime Render Graph Orchestrator
+// Owns execution of all subsystems without replacing them
 
-// Render graph node types
+// Node types
 #define RENDER_NODE_GEOMETRY      0.0
 #define RENDER_NODE_GBUFFER       1.0
 #define RENDER_NODE_SHADOW        2.0
@@ -25,6 +25,12 @@
 #define RENDER_NODE_BLOOM         13.0
 #define RENDER_NODE_TONEMAP       14.0
 #define RENDER_NODE_FINAL         15.0
+
+// Resource lifetime states
+#define RESOURCE_STATE_CREATED   0.0
+#define RESOURCE_STATE_READ      1.0
+#define RESOURCE_STATE_WRITTEN   2.0
+#define RESOURCE_STATE_RELEASED  3.0
 
 // Resource types
 #define RESOURCE_TEXTURE_2D    0.0
@@ -50,8 +56,10 @@ struct RenderNode {
     float id;
     float priority;
     float flags;
-    float inputCount;
-    float outputCount;
+    float inputs[4];
+    float outputs[4];
+    float dependencies[4];
+    float historyResource;
     bool enabled;
     bool executed;
 };
@@ -63,8 +71,11 @@ struct RenderResource {
     float height;
     float format;
     float usage;
+    float lifetime;
     bool shared;
     bool temporary;
+    float producerNode;
+    float consumerCount;
 };
 
 struct RenderGraph {
@@ -74,6 +85,9 @@ struct RenderGraph {
     float resourceCount;
     float quality;
     float frameNumber;
+    bool weatherEvaluated;
+    bool atmosphereEvaluated;
+    bool shadowEvaluated;
 };
 
 // Default render graph
@@ -83,8 +97,9 @@ RenderGraph rendererDefaultGraph() {
     g.resourceCount = 0.0;
     g.quality = RENDERER_BALANCED;
     g.frameNumber = 0.0;
-
-    // Nodes will be registered by subsystems
+    g.weatherEvaluated = false;
+    g.atmosphereEvaluated = false;
+    g.shadowEvaluated = false;
     return g;
 }
 
